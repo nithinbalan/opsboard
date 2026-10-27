@@ -196,7 +196,7 @@ jobs:
         run: docker build -t opsboard-frontend:ci ./frontend
 
       - name: Scan API image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: opsboard-api:ci
@@ -206,7 +206,7 @@ jobs:
           exit-code: '0'
 
       - name: Scan frontend image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: opsboard-frontend:ci
@@ -216,7 +216,7 @@ jobs:
           exit-code: '0'
 
       - name: Generate API SBOM
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: opsboard-api:ci
@@ -225,7 +225,7 @@ jobs:
           exit-code: '0'
 
       - name: Generate frontend SBOM
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: opsboard-frontend:ci
