@@ -175,3 +175,71 @@ jobs:
         working-directory: frontend
         run: npm audit --audit-level=high
 
+
+
+  container-security:
+    name: Container image security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -t opsboard-api:ci ./backend
+
+      - name: Build frontend image
+        run: docker build -t opsboard-frontend:ci ./frontend
+
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: opsboard-api:ci
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: opsboard-frontend:ci
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Generate API SBOM
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: opsboard-api:ci
+          format: cyclonedx
+          output: opsboard-api-sbom.json
+          exit-code: '0'
+
+      - name: Generate frontend SBOM
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: opsboard-frontend:ci
+          format: cyclonedx
+          output: opsboard-frontend-sbom.json
+          exit-code: '0'
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: opsboard-container-sboms
+          path: |
+            opsboard-api-sbom.json
+            opsboard-frontend-sbom.json
+          if-no-files-found: error
+          retention-days: 30
+
