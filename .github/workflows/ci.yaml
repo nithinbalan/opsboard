@@ -1,4 +1,4 @@
-name: Application CI
+name: OpsBoard - CI and Security
 
 on:
   pull_request:
@@ -9,43 +9,47 @@ on:
       - main
   workflow_dispatch:
 
+# Least-privilege default permissions.
 permissions:
   contents: read
 
+# Cancel obsolete runs for the same branch or pull request.
 concurrency:
-  group: app-ci-${{ github.workflow }}-${{ github.ref }}
+  group: opsboard-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Go tests and static checks
+  # ============================================================
+  # BACKEND: GO QUALITY, TESTS AND BUILD
+  # ============================================================
+  backend-quality:
+    name: Backend - Quality, Tests and Build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     defaults:
       run:
         working-directory: backend
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Latest stable Go, so the toolchain and standard library carry
-          # current security patches (go.mod's "go 1.25.0" would pin 1.25.0).
           go-version: stable
           check-latest: true
           cache-dependency-path: backend/go.sum
 
-      - name: Verify Go dependencies
+      - name: Verify dependency files are tidy
         run: go mod tidy -diff
 
-      - name: Check Go formatting
-        run: test -z "$(gofmt -l .)"
+      - name: Verify Go formatting
+        run: |
+          test -z "$(gofmt -l .)"
 
-      - name: Run Go tests
+      - name: Run unit tests with race detection and coverage
         run: go test -race -cover ./...
 
       - name: Run Go static analysis
@@ -54,27 +58,30 @@ jobs:
       - name: Build Go application
         run: go build ./...
 
-  frontend:
-    name: Angular build and tests
+  # ============================================================
+  # FRONTEND: ANGULAR QUALITY, TESTS AND BUILD
+  # ============================================================
+  frontend-quality:
+    name: Frontend - Angular Build and Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     defaults:
       run:
         working-directory: frontend
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install locked dependencies
         run: npm ci
 
       - name: Build production frontend
@@ -83,8 +90,11 @@ jobs:
       - name: Run frontend tests
         run: npm test -- --no-watch
 
+  # ============================================================
+  # SUPPLY-CHAIN SECURITY: PULL REQUEST DEPENDENCIES
+  # ============================================================
   dependency-review:
-    name: Dependency review
+    name: Security - Pull Request Dependency Review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -94,14 +104,17 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Review dependency changes
         uses: actions/dependency-review-action@v4
 
-  secrets-scan:
-    name: Secret scanning
+  # ============================================================
+  # SECRET DETECTION
+  # ============================================================
+  secret-scan:
+    name: Security - Secret Detection
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -109,33 +122,34 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout source
+      - name: Checkout full Git history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Scan repository for secrets
+      - name: Scan repository for exposed secrets
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ============================================================
+  # GO VULNERABILITY ANALYSIS
+  # ============================================================
   go-vulnerability-scan:
-    name: Go vulnerability scan
+    name: Security - Go Vulnerability Analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     permissions:
       contents: read
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Latest stable Go, so the toolchain and standard library carry
-          # current security patches (go.mod's "go 1.25.0" would pin 1.25.0).
           go-version: stable
           check-latest: true
           cache-dependency-path: backend/go.sum
@@ -143,79 +157,67 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: Scan Go application
+      - name: Analyze Go application for known vulnerabilities
         working-directory: backend
         run: |
           "$(go env GOPATH)/bin/govulncheck" ./...
 
+  # ============================================================
+  # FRONTEND DEPENDENCY VULNERABILITY AUDIT
+  # ============================================================
   frontend-dependency-audit:
-    name: Frontend dependency audit
+    name: Security - Frontend Dependency Audit
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     permissions:
       contents: read
 
+    defaults:
+      run:
+        working-directory: frontend
+
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
-        working-directory: frontend
+      - name: Install locked dependencies
         run: npm ci
 
-      - name: Audit dependencies
-        working-directory: frontend
+      - name: Fail on high or critical dependency vulnerabilities
         run: npm audit --audit-level=high
 
-
-
+  # ============================================================
+  # CONTAINER SECURITY AND SOFTWARE BILL OF MATERIALS
+  # ============================================================
   container-security:
-    name: Container image security
+    name: Security - Container Scanning and SBOM
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     permissions:
       contents: read
 
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build API image
+      - name: Build backend API image
         run: docker build -t opsboard-api:ci ./backend
 
       - name: Build frontend image
         run: docker build -t opsboard-frontend:ci ./frontend
 
-      - name: Scan API image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          image-ref: opsboard-api:ci
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '0'
-
-      - name: Scan frontend image
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          scan-type: image
-          image-ref: opsboard-frontend:ci
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: '0'
-
-      - name: Generate API SBOM
+      # Generate SBOMs before the enforcing scans so they can
+      # still be uploaded when a vulnerability scan fails.
+      - name: Generate backend API CycloneDX SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -224,7 +226,7 @@ jobs:
           output: opsboard-api-sbom.json
           exit-code: '0'
 
-      - name: Generate frontend SBOM
+      - name: Generate frontend CycloneDX SBOM
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -233,13 +235,37 @@ jobs:
           output: opsboard-frontend-sbom.json
           exit-code: '0'
 
-      - name: Upload SBOM artifacts
+      - name: Scan backend API image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: opsboard-api:ci
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+      - name: Scan frontend image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: opsboard-frontend:ci
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+      - name: Upload container SBOM artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: opsboard-container-sboms
           path: |
             opsboard-api-sbom.json
             opsboard-frontend-sbom.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
-
