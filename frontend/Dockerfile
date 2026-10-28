@@ -10,10 +10,12 @@ COPY . .
 RUN npm run build
 
 
-FROM nginx:stable-alpine
+# Production image
+FROM nginx:stable-alpine3.24
 
-# Configure NGINX for non-root execution.
-RUN sed -i 's|^pid .*;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+# Upgrade installed Alpine packages and configure NGINX for non-root execution.
+RUN apk -U upgrade \
+    && sed -i 's|^pid .*;|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
     && sed -i '/^[[:space:]]*user[[:space:]]/d' /etc/nginx/nginx.conf \
     && mkdir -p /tmp/client_temp /tmp/proxy_temp \
        /tmp/fastcgi_temp /tmp/uwsgi_temp /tmp/scgi_temp \
@@ -27,4 +29,3 @@ EXPOSE 8080
 USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]
-
